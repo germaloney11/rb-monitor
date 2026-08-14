@@ -2,7 +2,7 @@ name: Check Red Books Book Drop
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # every 10 minutes
+    - cron: '*/5 * * * *'   # every 5 minutes (fastest allowed)
   workflow_dispatch:
 
 jobs:
@@ -36,5 +36,4 @@ jobs:
             git push
           )
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}       env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

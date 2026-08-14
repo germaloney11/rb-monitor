@@ -2,21 +2,19 @@ name: Check Red Books Book Drop
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # every 10 minutes (safest frequent setting)
-  workflow_dispatch:         # allows manual run from Actions tab
+    - cron: '*/10 * * * *'   # every 10 minutes
+  workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # needed to commit the state file
+      contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -28,11 +26,15 @@ jobs:
       - name: Run checker
         run: python check_bookdrop.py
 
-      - name: Commit state (if changed)
+      - name: Commit state if changed
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add last_seen.json || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last seen Book Drop" && git push)
+          git diff --quiet && git diff --staged --quiet || (
+            git commit -m "Update last seen Book Drop state" &&
+            git push
+          )
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}       env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

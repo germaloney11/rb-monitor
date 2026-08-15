@@ -6,7 +6,11 @@ import re
 from datetime import datetime, timezone
 
 # ========== CONFIG ==========
-PAGE_URL = "https://www.facebook.com/redbooksire"
+PAGE_URLS = [
+    "https://www.facebook.com/redbooksire",
+    "https://mbasic.facebook.com/redbooksire",
+    "https://mbasic.facebook.com/redbooksire?v=timeline",
+]
 NTFY_TOPIC = "redbooks-bookdrop-x7k9m2p"
 STATE_FILE = "last_seen.json"
 KEYWORD = "BOOK DROP"
@@ -41,34 +45,48 @@ def send_notification(title, message):
     )
     print(f"Notification sent: {title}")
 
+def fetch_page(url):
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=25)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        print(f"Failed to fetch {url}: {e}")
+        return None
+
 def main():
     print(f"Checking at {datetime.now(timezone.utc).isoformat()}")
 
-    try:
-        response = requests.get(PAGE_URL, headers=HEADERS, timeout=30)
-        response.raise_for_status()
-        html = response.text
-    except Exception as e:
-        print(f"Failed to fetch page: {e}")
+    html = None
+    used_url = None
+
+    # Try normal page first, then mbasic fallbacks
+    for url in PAGE_URLS:
+        print(f"Trying {url}")
+        html = fetch_page(url)
+        if html and KEYWORD.upper() in html.upper():
+            used_url = url
+            print(f"Found keyword on {url}")
+            break
+        elif html:
+            print(f"Page loaded but no '{KEYWORD}' found")
+        else:
+            print("Page failed to load")
+
+    if not html or KEYWORD.upper() not in html.upper():
+        print("No 'BOOK DROP' found on any URL")
         return
 
-    # Look for the keyword anywhere in the page
-    if KEYWORD.upper() not in html.upper():
-        print("No 'BOOK DROP' found on the page")
-        return
-
-    # Create a simple hash of the relevant part of the page to avoid re-notifying
-    # We take a chunk around the keyword to detect new posts
+    # Create a hash of text around the keyword to avoid duplicate notifications
     matches = list(re.finditer(re.escape(KEYWORD), html, re.IGNORECASE))
     if not matches:
-        print("Keyword found but no usable match")
+        print("Keyword found but no usable match positions")
         return
 
-    # Take text around the first few matches
     snippets = []
     for m in matches[:3]:
-        start = max(0, m.start() - 200)
-        end = min(len(html), m.end() + 400)
+        start = max(0, m.start() - 250)
+        end = min(len(html), m.end() + 450)
         snippets.append(html[start:end])
 
     content_to_hash = "|||".join(snippets)
@@ -79,4 +97,16 @@ def main():
         print("Already notified about this content")
         return
 
-    # New match found
+    # New match → send notification
+    send_notification(
+        title="BOOK DROP at Red Books!",
+        message="A new post containing 'BOOK DROP' was detected.\n\nOpen the page:\nhttps://www.facebook.com/redbooksire"
+    )
+
+    state.setdefault("seen_hashes", []).append(content_hash)
+    state["seen_hashes"] = state["seen_hashes"][-20:]
+    save_state(state)
+    print("New Book Drop detected and notified")
+
+if __name__ == "__main__":
+    main()

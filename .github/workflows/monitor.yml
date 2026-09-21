@@ -2,8 +2,7 @@ name: Red Books Monitor
 
 on:
   schedule:
-    # Every 5 minutes between 12:30–15:30 UTC = 6:00–9:00 pm IST
-    - cron: '*/5 12-15 * * *'
+    - cron: '*/5 12-15 * * *'   # 6–9 pm IST
   workflow_dispatch:
 
 jobs:
@@ -21,13 +20,27 @@ jobs:
       - name: Install urlwatch
         run: pip install urlwatch
 
-      - name: Create config directory and copy files
+      - name: Prepare and verify config
         run: |
-          mkdir -p \~/.config/urlwatch
-          mkdir -p \~/.cache/urlwatch
-          cp urls.yaml \~/.config/urlwatch/urls.yaml
-          cp urlwatch.yaml \~/.config/urlwatch/urlwatch.yaml
-          ls -la \~/.config/urlwatch/   # just for debugging
+          echo "=== Files in repo ==="
+          ls -la
+          echo ""
+          echo "=== Creating directories ==="
+          mkdir -p $HOME/.config/urlwatch
+          mkdir -p $HOME/.cache/urlwatch
+          echo ""
+          echo "=== Copying files ==="
+          cp -v urls.yaml $HOME/.config/urlwatch/urls.yaml
+          cp -v urlwatch.yaml $HOME/.config/urlwatch/urlwatch.yaml
+          echo ""
+          echo "=== Config directory contents ==="
+          ls -la $HOME/.config/urlwatch/
+          echo ""
+          echo "=== urls.yaml content ==="
+          cat $HOME/.config/urlwatch/urls.yaml
+          echo ""
+          echo "=== urlwatch.yaml content ==="
+          cat $HOME/.config/urlwatch/urlwatch.yaml
 
       - name: Restore cache
         uses: actions/cache@v4
@@ -38,7 +51,11 @@ jobs:
             urlwatch-cache-
 
       - name: Run urlwatch
-        run: urlwatch --cache \~/.cache/urlwatch/cache.db
+        run: |
+          urlwatch \
+            --urls $HOME/.config/urlwatch/urls.yaml \
+            --config $HOME/.config/urlwatch/urlwatch.yaml \
+            --cache $HOME/.cache/urlwatch/cache.db
 
       - name: Save cache
         if: always()

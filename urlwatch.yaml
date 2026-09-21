@@ -1,0 +1,14 @@
+display:
+  new: true
+  error: true
+  unchanged: false
+  empty-diff: false
+
+report:
+  ntfy:
+    enabled: true
+    topic_url: "https://ntfy.sh/YOUR-SECRET-TOPIC-HERE"   # ← change this
+    priorities:
+      changed: high
+      new: high
+      error: default

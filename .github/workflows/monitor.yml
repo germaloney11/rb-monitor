@@ -2,7 +2,10 @@ name: Red Books Monitor
 
 on:
   schedule:
-    - cron: '*/5 12-15 * * *'   # 6–9 pm IST
+    # Every 5 minutes from 12:00–16:00 UTC ≈ 5:30 pm – 9:30 pm IST
+    - cron: '*/5 12-15 * * *'
+    # Extra wider window every 10 minutes
+    - cron: '*/10 11-16 * * *'
   workflow_dispatch:
 
 jobs:
@@ -25,21 +28,18 @@ jobs:
           echo "=== Files in repo ==="
           ls -la
           echo ""
-          echo "=== Creating directories ==="
           mkdir -p $HOME/.config/urlwatch
           mkdir -p $HOME/.cache/urlwatch
-          echo ""
-          echo "=== Copying files ==="
           cp -v urls.yaml $HOME/.config/urlwatch/urls.yaml
           cp -v urlwatch.yaml $HOME/.config/urlwatch/urlwatch.yaml
           echo ""
-          echo "=== Config directory contents ==="
+          echo "=== Config directory ==="
           ls -la $HOME/.config/urlwatch/
           echo ""
-          echo "=== urls.yaml content ==="
+          echo "=== urls.yaml ==="
           cat $HOME/.config/urlwatch/urls.yaml
           echo ""
-          echo "=== urlwatch.yaml content ==="
+          echo "=== urlwatch.yaml ==="
           cat $HOME/.config/urlwatch/urlwatch.yaml
 
       - name: Restore cache

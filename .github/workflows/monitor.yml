@@ -2,10 +2,9 @@ name: Red Books Monitor
 
 on:
   schedule:
-    # Runs every 5 minutes between 12:30–15:30 UTC
-    # = 6:00–9:00 pm IST (UTC+5:30)
+    # Every 5 minutes between 12:30–15:30 UTC = 6:00–9:00 pm IST
     - cron: '*/5 12-15 * * *'
-  workflow_dispatch:   # allows manual testing
+  workflow_dispatch:
 
 jobs:
   monitor:
@@ -22,6 +21,14 @@ jobs:
       - name: Install urlwatch
         run: pip install urlwatch
 
+      - name: Create config directory and copy files
+        run: |
+          mkdir -p \~/.config/urlwatch
+          mkdir -p \~/.cache/urlwatch
+          cp urls.yaml \~/.config/urlwatch/urls.yaml
+          cp urlwatch.yaml \~/.config/urlwatch/urlwatch.yaml
+          ls -la \~/.config/urlwatch/   # just for debugging
+
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -31,11 +38,7 @@ jobs:
             urlwatch-cache-
 
       - name: Run urlwatch
-        run: |
-          mkdir -p \~/.config/urlwatch
-          cp urls.yaml \~/.config/urlwatch/
-          cp urlwatch.yaml \~/.config/urlwatch/
-          urlwatch --cache \~/.cache/urlwatch/cache.db
+        run: urlwatch --cache \~/.cache/urlwatch/cache.db
 
       - name: Save cache
         if: always()

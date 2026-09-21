@@ -1,27 +1,22 @@
-# Main (usually most reliable for public posts)
-name: Red Books (mbasic)
+name: Red Books BOOK DROP (mbasic)
 url: https://mbasic.facebook.com/redbooksire
 filter:
-  - css: div#objects_container
   - html2text
-  - grep: "(?i)BOOK DROP|book drop|NIGHT BOOK DROP|night book drop"
+  - grep: "(?i)BOOK.?DROP|night.?book.?drop"
   - strip
 
 ---
-# Backup 1 – mobile version
-name: Red Books (m.facebook)
+name: Red Books BOOK DROP (m)
 url: https://m.facebook.com/redbooksire
 filter:
-  - css: div#objects_container
   - html2text
-  - grep: "(?i)BOOK DROP|book drop|NIGHT BOOK DROP|night book drop"
+  - grep: "(?i)BOOK.?DROP|night.?book.?drop"
   - strip
 
 ---
-# Backup 2 – regular desktop version
-name: Red Books (www)
+name: Red Books BOOK DROP (www)
 url: https://www.facebook.com/redbooksire
 filter:
   - html2text
-  - grep: "(?i)BOOK DROP|book drop|NIGHT BOOK DROP|night book drop"
+  - grep: "(?i)BOOK.?DROP|night.?book.?drop"
   - strip

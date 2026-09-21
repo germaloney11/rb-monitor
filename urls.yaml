@@ -1,0 +1,7 @@
+name: Red Books BOOK DROP
+url: https://mbasic.facebook.com/redbooksire
+filter:
+  - css: div#objects_container
+  - html2text
+  - grep: "(?i)BOOK DROP|book drop|NIGHT BOOK DROP|night book drop"
+  - strip

@@ -7,7 +7,7 @@ display:
 report:
   ntfy:
     enabled: true
-    topic_url: "https://ntfy.sh/YOUR-SECRET-TOPIC-HERE"   # ← change this
+    topic_url: "https://ntfy.sh/redbooks-bookdrop-xyz123"   # ← change this
     priorities:
       changed: high
       new: high

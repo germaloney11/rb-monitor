@@ -2,9 +2,9 @@ name: Red Books Monitor
 
 on:
   schedule:
-    # Every 5 minutes from 12:00–16:00 UTC ≈ 5:30 pm – 9:30 pm IST
+    # Every 5 minutes from 12:00–16:00 UTC (≈ 5:30 pm – 9:30 pm IST)
     - cron: '*/5 12-15 * * *'
-    # Extra wider window every 10 minutes
+    # Wider safety window every 10 minutes
     - cron: '*/10 11-16 * * *'
   workflow_dispatch:
 

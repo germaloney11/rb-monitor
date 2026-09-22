@@ -2,7 +2,7 @@ name: Red Books BOOK DROP (mbasic)
 url: https://mbasic.facebook.com/redbooksire
 filter:
   - html2text
-  - grep: "(?i)BOOK.?DROP|night.?book.?drop"
+  - grep: "(?i)book.?drop"
   - strip
 
 ---
@@ -10,7 +10,7 @@ name: Red Books BOOK DROP (m)
 url: https://m.facebook.com/redbooksire
 filter:
   - html2text
-  - grep: "(?i)BOOK.?DROP|night.?book.?drop"
+  - grep: "(?i)book.?drop"
   - strip
 
 ---
@@ -18,5 +18,5 @@ name: Red Books BOOK DROP (www)
 url: https://www.facebook.com/redbooksire
 filter:
   - html2text
-  - grep: "(?i)BOOK.?DROP|night.?book.?drop"
+  - grep: "(?i)book.?drop"
   - strip

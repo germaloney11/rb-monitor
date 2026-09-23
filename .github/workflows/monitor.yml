@@ -1,10 +1,20 @@
 name: Red Books BOOK DROP Monitor
 
 on:
+  schedule:
+    # Every 5 minutes from 17:00 through 21:55
+    # Ireland time.
+    - cron: '*/5 17-21 * * *'
+      timezone: 'Europe/Dublin'
+
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: red-books-monitor
+  cancel-in-progress: false
 
 jobs:
   monitor:
@@ -28,7 +38,7 @@ jobs:
 
       - name: Create urlwatch directories
         run: |
-          mkdir -p .urlwatch
+          mkdir -p .urlwatch/cache
 
       - name: Run urlwatch
         env:
@@ -47,25 +57,15 @@ jobs:
 
           mkdir -p "$XDG_CACHE_HOME"
 
-          echo "Running urlwatch..."
+          echo "=============================================="
+          echo "Running urlwatch"
+          echo "=============================================="
+
           urlwatch \
             --urls "$GITHUB_WORKSPACE/urls.yaml" \
             --config "$XDG_CONFIG_HOME/urlwatch.yaml" \
             --cache "$XDG_CACHE_HOME/cache.db" \
             --verbose
-
-      - name: Show urlwatch cache
-        if: always()
-        run: |
-          echo "=============================================="
-          echo "URLWATCH CACHE FILE"
-          echo "=============================================="
-
-          if [ -f ".urlwatch/cache/cache.db" ]; then
-            ls -lh .urlwatch/cache/cache.db
-          else
-            echo "Cache file not found."
-          fi
 
       - name: Commit urlwatch history
         if: always()

@@ -1,52 +1,88 @@
-# Force re-register schedule - 23 Sep 2026
-name: Red Books Monitor
+name: Red Books BOOK DROP Monitor
 
 on:
   schedule:
-    # Every 5 minutes from 16:00–20:59 UTC = 5:00 pm – 9:59 pm Irish time
-    - cron: '*/5 16-20 * * *'
+    # Every 5 minutes from 17:00 through 21:55
+    # Irish time, automatically handling GMT/IST.
+    - cron: '*/5 17-21 * * *'
+      timezone: 'Europe/Dublin'
+
+  # Allows manual testing from the Actions page.
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: red-books-monitor
+  cancel-in-progress: false
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.x'
 
       - name: Install urlwatch
-        run: pip install urlwatch
-
-      - name: Prepare config
         run: |
-          mkdir -p $HOME/.config/urlwatch
-          mkdir -p $HOME/.cache/urlwatch
-          cp urls.yaml $HOME/.config/urlwatch/urls.yaml
-          cp urlwatch.yaml $HOME/.config/urlwatch/urlwatch.yaml
+          python -m pip install --upgrade pip
+          python -m pip install urlwatch
 
-      - name: Restore cache
-        uses: actions/cache@v4
-        with:
-          path: \~/.cache/urlwatch
-          key: urlwatch-cache-v1
-          restore-keys: |
-            urlwatch-cache-
+      - name: Create urlwatch directories
+        run: |
+          mkdir -p .urlwatch
 
       - name: Run urlwatch
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          urlwatch \
-            --urls $HOME/.config/urlwatch/urls.yaml \
-            --config $HOME/.config/urlwatch/urlwatch.yaml \
-            --cache $HOME/.cache/urlwatch/cache.db
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "ERROR: NTFY_TOPIC GitHub secret is not configured."
+            exit 1
+          fi
 
-      - name: Save cache
+          # Create the runtime config from the repository config,
+          # inserting the private ntfy topic without committing it.
+          sed "s|__NTFY_TOPIC__|${NTFY_TOPIC}|g" \
+            urlwatch.yaml > .urlwatch/urlwatch.yaml
+
+          # Use the repository as the persistent urlwatch data location.
+          export XDG_CONFIG_HOME="$GITHUB_WORKSPACE/.urlwatch"
+          export XDG_CACHE_HOME="$GITHUB_WORKSPACE/.urlwatch/cache"
+
+          mkdir -p "$XDG_CACHE_HOME"
+
+          echo "Running urlwatch..."
+          urlwatch \
+            --urls "$GITHUB_WORKSPACE/urls.yaml" \
+            --config "$XDG_CONFIG_HOME/urlwatch.yaml" \
+            --cache "$XDG_CACHE_HOME/cache.db" \
+            --verbose
+
+      - name: Commit urlwatch history
         if: always()
-        uses: actions/cache@v4
-        with:
-          path: \~/.cache/urlwatch
-          key: urlwatch-cache-v1
+        run: |
+          if [ -f ".urlwatch/cache/cache.db" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add .urlwatch/cache/cache.db
+
+            if git diff --cached --quiet; then
+              echo "No urlwatch history changes to commit."
+            else
+              git commit -m "Update urlwatch history"
+              git push
+            fi
+          else
+            echo "No urlwatch cache database found."
+          fi

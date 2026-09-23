@@ -1,0 +1,11 @@
+# Local urlwatch runtime files
+.urlwatch/urlwatch.yaml
+.urlwatch/cache/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editors
+.vscode/
+.idea/

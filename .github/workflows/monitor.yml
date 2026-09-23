@@ -2,7 +2,7 @@ name: Red Books Monitor
 
 on:
   schedule:
-    # Every 5 minutes from 16:00–20:30 UTC = 5:00 pm – 9:30 pm Irish time
+    # Every 5 minutes from 16:00–20:59 UTC = 5:00 pm – 9:59 pm Irish time
     - cron: '*/5 16-20 * * *'
   workflow_dispatch:
 
@@ -21,30 +21,18 @@ jobs:
       - name: Install urlwatch
         run: pip install urlwatch
 
-      - name: Prepare and verify config
+      - name: Prepare config
         run: |
-          echo "=== Files in repo ==="
-          ls -la
-          echo ""
           mkdir -p $HOME/.config/urlwatch
           mkdir -p $HOME/.cache/urlwatch
-          cp -v urls.yaml $HOME/.config/urlwatch/urls.yaml
-          cp -v urlwatch.yaml $HOME/.config/urlwatch/urlwatch.yaml
-          echo ""
-          echo "=== Config directory ==="
-          ls -la $HOME/.config/urlwatch/
-          echo ""
-          echo "=== urls.yaml ==="
-          cat $HOME/.config/urlwatch/urls.yaml
-          echo ""
-          echo "=== urlwatch.yaml ==="
-          cat $HOME/.config/urlwatch/urlwatch.yaml
+          cp urls.yaml $HOME/.config/urlwatch/urls.yaml
+          cp urlwatch.yaml $HOME/.config/urlwatch/urlwatch.yaml
 
       - name: Restore cache
         uses: actions/cache@v4
         with:
           path: \~/.cache/urlwatch
-          key: urlwatch-cache-${{ github.run_id }}
+          key: urlwatch-cache-v1
           restore-keys: |
             urlwatch-cache-
 
@@ -60,4 +48,4 @@ jobs:
         uses: actions/cache@v4
         with:
           path: \~/.cache/urlwatch
-          key: urlwatch-cache-${{ github.run_id }}
+          key: urlwatch-cache-v1

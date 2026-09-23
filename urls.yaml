@@ -1,6 +1,6 @@
 kind: url
-name: "Red Books Ireland - DIAGNOSTIC"
-url: "https://www.facebook.com/redbooksire"
+name: "Red Books Ireland - BOOK DROP"
+url: "https://m.facebook.com/redbooksire"
 useragent: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
 timeout: 30
 max_tries: 3

@@ -1,6 +1,5 @@
-# Local urlwatch runtime files
+# Local urlwatch configuration containing the private ntfy topic
 .urlwatch/urlwatch.yaml
-.urlwatch/cache/
 
 # Python
 __pycache__/

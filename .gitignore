@@ -1,10 +1,7 @@
-# Local urlwatch configuration containing the private ntfy topic
 .urlwatch/urlwatch.yaml
 
-# Python
 __pycache__/
 *.py[cod]
 
-# Editors
 .vscode/
 .idea/

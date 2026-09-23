@@ -2,8 +2,8 @@ name: Red Books Monitor
 
 on:
   schedule:
-    # Every 5 minutes from 12:00–16:00 UTC ≈ 5:30 pm – 9:30 pm IST
-    - cron: '*/5 12-15 * * *'
+    # Every 5 minutes from 11:00–15:59 UTC ≈ 4:30/5:00 pm – 9:30 pm IST
+    - cron: '*/5 11-15 * * *'
   workflow_dispatch:
 
 jobs:

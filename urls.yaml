@@ -1,3 +1,4 @@
+kind: url
 name: "Red Books Ireland - BOOK DROP"
 url: "https://www.facebook.com/redbooksire"
 useragent: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
@@ -8,12 +9,8 @@ treat_new_as_changed: false
 
 filter:
   - html2text
-  - grep: "(?i)book[[:space:]]*[-–—]?[[:space:]]*drop"
+  - grep: "(?i)\bbook\s*[-–—]?\s*drop\b"
   - strip
-
-diff_filter:
-  - grep: "^[+]"
-  - grepi: "^[+]{3}"
 
 tags:
   - redbooks

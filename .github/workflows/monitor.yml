@@ -1,87 +1,127 @@
-name: Red Books BOOK DROP Monitor
+name: Test Red Books Facebook
 
 on:
-  schedule:
-    # Every 5 minutes from 17:00 through 21:55
-    # Ireland time.
-    - cron: '*/5 17-21 * * *'
-      timezone: 'Europe/Dublin'
-
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: red-books-monitor
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  monitor:
+  test-facebook:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Install urlwatch
+      - name: Install Playwright
         run: |
           python -m pip install --upgrade pip
-          python -m pip install urlwatch
+          pip install playwright
+          python -m playwright install --with-deps chromium
 
-      - name: Create urlwatch directories
+      - name: Test Facebook page
         run: |
-          mkdir -p .urlwatch/cache
+          cat > test_facebook.py <<'PY'
+          from playwright.sync_api import sync_playwright
+          import re
+          import time
 
-      - name: Run urlwatch
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: |
-          if [ -z "$NTFY_TOPIC" ]; then
-            echo "ERROR: NTFY_TOPIC GitHub secret is not configured."
-            exit 1
-          fi
+          URL = "https://www.facebook.com/redbooksire"
 
-          sed "s|__NTFY_TOPIC__|${NTFY_TOPIC}|g" \
-            urlwatch.yaml > .urlwatch/urlwatch.yaml
+          with sync_playwright() as p:
+              browser = p.chromium.launch(
+                  headless=True,
+                  args=[
+                      "--no-sandbox",
+                      "--disable-dev-shm-usage"
+                  ]
+              )
 
-          export XDG_CONFIG_HOME="$GITHUB_WORKSPACE/.urlwatch"
-          export XDG_CACHE_HOME="$GITHUB_WORKSPACE/.urlwatch/cache"
+              context = browser.new_context(
+                  viewport={"width": 1280, "height": 900},
+                  locale="en-IE",
+                  timezone_id="Europe/Dublin",
+                  user_agent=(
+                      "Mozilla/5.0 (X11; Linux x86_64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/140.0.0.0 Safari/537.36"
+                  )
+              )
 
-          mkdir -p "$XDG_CACHE_HOME"
+              page = context.new_page()
 
-          echo "=============================================="
-          echo "Running urlwatch"
-          echo "=============================================="
+              print("=" * 60)
+              print("Opening Facebook page")
+              print("=" * 60)
 
-          urlwatch \
-            --urls "$GITHUB_WORKSPACE/urls.yaml" \
-            --config "$XDG_CONFIG_HOME/urlwatch.yaml" \
-            --cache "$XDG_CACHE_HOME/cache.db" \
-            --verbose
+              response = page.goto(
+                  URL,
+                  wait_until="domcontentloaded",
+                  timeout=60000
+              )
 
-      - name: Commit urlwatch history
+              print("HTTP status:", response.status if response else "NONE")
+              print("Final URL:", page.url)
+              print("Title:", page.title())
+
+              # Give Facebook's JavaScript time to populate the page.
+              time.sleep(8)
+
+              print("=" * 60)
+              print("PAGE TEXT")
+              print("=" * 60)
+
+              text = page.locator("body").inner_text(timeout=30000)
+
+              # Print only the first 20,000 characters so the Actions log
+              # doesn't become unnecessarily huge.
+              print(text[:20000])
+
+              print("=" * 60)
+              print("BOOK DROP SEARCH")
+              print("=" * 60)
+
+              matches = re.findall(
+                  r".{0,300}book\s*[-–—]?\s*drop.{0,500}",
+                  text,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
+
+              if matches:
+                  print("FOUND BOOK DROP!")
+                  print("Number of matches:", len(matches))
+
+                  for i, match in enumerate(matches[:10], 1):
+                      print()
+                      print(f"--- MATCH {i} ---")
+                      print(match)
+              else:
+                  print("NO BOOK DROP TEXT FOUND.")
+
+              print("=" * 60)
+              print("SCREENSHOT")
+              print("=" * 60)
+
+              page.screenshot(
+                  path="facebook-page.png",
+                  full_page=True
+              )
+
+              browser.close()
+          PY
+
+          python test_facebook.py
+
+      - name: Upload screenshot
         if: always()
-        run: |
-          if [ -f ".urlwatch/cache/cache.db" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            git add -f .urlwatch/cache/cache.db
-
-            if git diff --cached --quiet; then
-              echo "No urlwatch history changes to commit."
-            else
-              git commit -m "Update urlwatch history"
-              git push
-            fi
-          else
-            echo "No urlwatch cache database found."
-          fi
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-page-screenshot
+          path: facebook-page.png
+          if-no-files-found: ignore

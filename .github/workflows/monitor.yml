@@ -1,4 +1,4 @@
-name: Test Red Books Scrolling
+name: Test Red Books Latest Post
 
 on:
   workflow_dispatch:
@@ -25,9 +25,9 @@ jobs:
           pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: Test Facebook scrolling
+      - name: Read newest Facebook post
         run: |
-          cat > test_facebook.py <<'PY'
+          cat > test_latest.py <<'PY'
           from playwright.sync_api import sync_playwright
           import re
           import time
@@ -57,7 +57,7 @@ jobs:
               page = context.new_page()
 
               print("=" * 70)
-              print("OPENING FACEBOOK")
+              print("OPENING RED BOOKS")
               print("=" * 70)
 
               response = page.goto(
@@ -70,149 +70,100 @@ jobs:
               print("Final URL:", page.url)
               print("Title:", page.title())
 
-              time.sleep(5)
+              time.sleep(8)
 
               # ---------------------------------------------------------
-              # Scroll repeatedly so Facebook has a chance to lazy-load
-              # additional posts.
-              # ---------------------------------------------------------
-
-              print()
-              print("=" * 70)
-              print("SCROLLING")
-              print("=" * 70)
-
-              previous_height = 0
-
-              for i in range(1, 16):
-
-                  print(f"Scroll {i}/15")
-
-                  page.evaluate("""
-                      window.scrollTo({
-                          top: document.body.scrollHeight,
-                          behavior: 'instant'
-                      });
-                  """)
-
-                  time.sleep(3)
-
-                  height = page.evaluate(
-                      "document.body.scrollHeight"
-                  )
-
-                  print("Page height:", height)
-
-                  if height == previous_height:
-                      print("Page height did not increase.")
-                  else:
-                      print("More page content detected.")
-
-                  previous_height = height
-
-              # Scroll back to top once finished.
-              page.evaluate("window.scrollTo(0, 0)")
-              time.sleep(2)
-
-              # ---------------------------------------------------------
-              # Get all visible page text.
-              # ---------------------------------------------------------
-
-              text = page.locator("body").inner_text(timeout=30000)
-
-              print()
-              print("=" * 70)
-              print("TEXT SUMMARY")
-              print("=" * 70)
-
-              print("Characters:", len(text))
-              print("BOOK occurrences:", len(
-                  re.findall(r"book", text, re.IGNORECASE)
-              ))
-
-              # Print the entire text up to 50,000 characters.
-              print()
-              print(text[:50000])
-
-              # ---------------------------------------------------------
-              # Search specifically for BOOK DROP.
+              # Find links that look like Facebook posts.
               # ---------------------------------------------------------
 
               print()
               print("=" * 70)
-              print("BOOK DROP SEARCH")
+              print("POST LINKS")
               print("=" * 70)
 
-              matches = re.findall(
-                  r".{0,500}book\s*[-–—]?\s*drop.{0,1000}",
-                  text,
-                  flags=re.IGNORECASE | re.DOTALL
-              )
+              post_links = []
 
-              if matches:
-                  print("FOUND BOOK DROP!")
-                  print("Matches:", len(matches))
-
-                  for i, match in enumerate(matches[:20], 1):
-                      print()
-                      print(f"--- MATCH {i} ---")
-                      print(match)
-              else:
-                  print("NO BOOK DROP TEXT FOUND.")
-
-              # ---------------------------------------------------------
-              # Look for Facebook post links.
-              # ---------------------------------------------------------
-
-              print()
-              print("=" * 70)
-              print("FACEBOOK LINKS")
-              print("=" * 70)
-
-              links = page.locator("a").all()
-
-              found_links = set()
-
-              for link in links:
+              for link in page.locator("a").all():
                   try:
                       href = link.get_attribute("href")
-                      if href and (
+
+                      if not href:
+                          continue
+
+                      if (
                           "/posts/" in href
                           or "/permalink/" in href
                           or "story_fbid=" in href
                       ):
-                          found_links.add(href)
+                          if href not in post_links:
+                              post_links.append(href)
+
                   except Exception:
                       pass
 
-              print("Post-like links found:", len(found_links))
+              print("Post links found:", len(post_links))
 
-              for href in sorted(found_links):
-                  print(href)
+              for i, href in enumerate(post_links[:10], 1):
+                  print(f"{i}: {href}")
 
               # ---------------------------------------------------------
-              # Screenshot after scrolling.
+              # Inspect the page text.
               # ---------------------------------------------------------
 
               print()
               print("=" * 70)
-              print("SAVING SCREENSHOT")
+              print("PAGE TEXT")
               print("=" * 70)
 
+              text = page.locator("body").inner_text(timeout=30000)
+
+              print(text[:15000])
+
+              # ---------------------------------------------------------
+              # Search for BOOK DROP.
+              # ---------------------------------------------------------
+
+              print()
+              print("=" * 70)
+              print("BOOK DROP")
+              print("=" * 70)
+
+              match = re.search(
+                  r"book\s*[-–—]?\s*drop",
+                  text,
+                  flags=re.IGNORECASE
+              )
+
+              if match:
+                  print("BOOK DROP FOUND")
+
+                  start = max(0, match.start() - 500)
+                  end = min(len(text), match.end() + 1000)
+
+                  print()
+                  print(text[start:end])
+
+              else:
+                  print("BOOK DROP NOT FOUND")
+
+              # ---------------------------------------------------------
+              # Save screenshot.
+              # ---------------------------------------------------------
+
               page.screenshot(
-                  path="facebook-scrolled.png",
+                  path="latest-post.png",
                   full_page=True
               )
 
               browser.close()
           PY
 
-          python test_facebook.py
+          python test_latest.py
 
       - name: Upload screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: facebook-scrolled-screenshot
-          path: facebook-scrolled.png
+          name: latest-facebook-post
+          path: latest-post.png
           if-no-files-found: ignore

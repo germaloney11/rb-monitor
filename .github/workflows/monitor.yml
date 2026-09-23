@@ -3,7 +3,8 @@ name: Red Books BOOK DROP Monitor
 
 on:
   schedule:
-    - cron: '0 0 1 1 *'          # dummy - 1st January only
+    - cron: '*/5 17-21 * * *'
+      timezone: 'Europe/Dublin'
   workflow_dispatch:
 
 permissions:

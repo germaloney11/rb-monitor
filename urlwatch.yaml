@@ -1,14 +1,24 @@
 display:
-  new: true
+  new: false
   error: true
   unchanged: false
   empty-diff: false
 
 report:
+  text:
+    details: true
+    footer: false
+    line_length: 120
+
+  stdout:
+    enabled: true
+
   ntfy:
     enabled: true
-    topic_url: "https://ntfy.sh/redbooks-bookdrop-xyz123"
+    topic_url: "https://ntfy.sh/__NTFY_TOPIC__"
+
     priorities:
-      changed: high
-      new: high
-      error: default
+      default: high
+      new: min
+      changed: max
+      error: high

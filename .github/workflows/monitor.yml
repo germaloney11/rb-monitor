@@ -1,169 +1,108 @@
-name: Test Red Books Latest Post
+name: Test Facebook Posts Page
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  test-facebook:
+  test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.x'
+          node-version: 20
 
       - name: Install Playwright
         run: |
-          python -m pip install --upgrade pip
-          pip install playwright
-          python -m playwright install --with-deps chromium
+          npm install playwright
+          npx playwright install chromium --with-deps
 
-      - name: Read newest Facebook post
+      - name: Test Facebook Posts
         run: |
-          cat > test_latest.py <<'PY'
-          from playwright.sync_api import sync_playwright
-          import re
-          import time
+          cat > test.js <<'EOF'
+          const { chromium } = require('playwright');
 
-          URL = "https://www.facebook.com/redbooksire"
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true
+            });
 
-          with sync_playwright() as p:
-              browser = p.chromium.launch(
-                  headless=True,
-                  args=[
-                      "--no-sandbox",
-                      "--disable-dev-shm-usage"
-                  ]
-              )
+            const page = await browser.newPage({
+              viewport: { width: 1280, height: 1000 },
+              userAgent:
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36'
+            });
 
-              context = browser.new_context(
-                  viewport={"width": 1280, "height": 900},
-                  locale="en-IE",
-                  timezone_id="Europe/Dublin",
-                  user_agent=(
-                      "Mozilla/5.0 (X11; Linux x86_64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/140.0.0.0 Safari/537.36"
-                  )
-              )
+            const url = 'https://www.facebook.com/redbooksire/posts';
 
-              page = context.new_page()
+            console.log('Opening:', url);
 
-              print("=" * 70)
-              print("OPENING RED BOOKS")
-              print("=" * 70)
+            const response = await page.goto(url, {
+              waitUntil: 'domcontentloaded',
+              timeout: 60000
+            });
 
-              response = page.goto(
-                  URL,
-                  wait_until="domcontentloaded",
-                  timeout=60000
-              )
+            console.log('HTTP status:', response ? response.status() : 'none');
 
-              print("HTTP status:", response.status if response else "NONE")
-              print("Final URL:", page.url)
-              print("Title:", page.title())
+            await page.waitForTimeout(10000);
 
-              time.sleep(8)
+            console.log('Final URL:', page.url());
+            console.log('Title:', await page.title());
 
-              # ---------------------------------------------------------
-              # Find links that look like Facebook posts.
-              # ---------------------------------------------------------
+            const text = await page.locator('body').innerText();
 
-              print()
-              print("=" * 70)
-              print("POST LINKS")
-              print("=" * 70)
+            console.log('========== PAGE TEXT ==========');
+            console.log(text.substring(0, 30000));
+            console.log('========== END PAGE TEXT ==========');
 
-              post_links = []
+            const links = await page.locator('a').evaluateAll(links =>
+              links.map(a => ({
+                text: (a.innerText || '').trim(),
+                href: a.href
+              })).filter(x => x.href)
+            );
 
-              for link in page.locator("a").all():
-                  try:
-                      href = link.get_attribute("href")
+            console.log('========== POST LINKS ==========');
 
-                      if not href:
-                          continue
+            for (const link of links) {
+              if (
+                link.href.includes('/posts/') ||
+                link.href.includes('story.php') ||
+                link.href.includes('permalink.php')
+              ) {
+                console.log(JSON.stringify(link));
+              }
+            }
 
-                      if (
-                          "/posts/" in href
-                          or "/permalink/" in href
-                          or "story_fbid=" in href
-                      ):
-                          if href not in post_links:
-                              post_links.append(href)
+            console.log('========== BOOK DROP SEARCH ==========');
 
-                  except Exception:
-                      pass
+            const lower = text.toLowerCase();
 
-              print("Post links found:", len(post_links))
+            if (lower.includes('book drop')) {
+              console.log('*** BOOK DROP FOUND ***');
+            } else {
+              console.log('No BOOK DROP found.');
+            }
 
-              for i, href in enumerate(post_links[:10], 1):
-                  print(f"{i}: {href}")
+            await page.screenshot({
+              path: 'facebook-posts.png',
+              fullPage: true
+            });
 
-              # ---------------------------------------------------------
-              # Inspect the page text.
-              # ---------------------------------------------------------
+            await browser.close();
+          })();
+          EOF
 
-              print()
-              print("=" * 70)
-              print("PAGE TEXT")
-              print("=" * 70)
-
-              text = page.locator("body").inner_text(timeout=30000)
-
-              print(text[:15000])
-
-              # ---------------------------------------------------------
-              # Search for BOOK DROP.
-              # ---------------------------------------------------------
-
-              print()
-              print("=" * 70)
-              print("BOOK DROP")
-              print("=" * 70)
-
-              match = re.search(
-                  r"book\s*[-–—]?\s*drop",
-                  text,
-                  flags=re.IGNORECASE
-              )
-
-              if match:
-                  print("BOOK DROP FOUND")
-
-                  start = max(0, match.start() - 500)
-                  end = min(len(text), match.end() + 1000)
-
-                  print()
-                  print(text[start:end])
-
-              else:
-                  print("BOOK DROP NOT FOUND")
-
-              # ---------------------------------------------------------
-              # Save screenshot.
-              # ---------------------------------------------------------
-
-              page.screenshot(
-                  path="latest-post.png",
-                  full_page=True
-              )
-
-              browser.close()
-          PY
-
-          python test_latest.py
+          node test.js
 
       - name: Upload screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: latest-facebook-post
-          path: latest-post.png
+          name: facebook-posts-test
+          path: facebook-posts.png
           if-no-files-found: ignore

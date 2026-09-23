@@ -1,13 +1,28 @@
-name: Red Books Facebook Test
+name: Red Books BOOK DROP Monitor
 
 on:
+  schedule:
+    - cron: '*/5 17-21 * * *'
+      timezone: 'Europe/Dublin'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: red-books-monitor
+  cancel-in-progress: false
+
 jobs:
-  test:
+  monitor:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -18,125 +33,390 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
-      - name: Test Facebook
+      - name: Check Red Books
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          cat > test.js <<'EOF'
-          const { chromium } = require('playwright');
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "ERROR: NTFY_TOPIC secret is missing."
+            exit 1
+          fi
 
-          const endpoints = [
+          cat > monitor.js <<'EOF'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+
+          const ENDPOINTS = [
             'https://www.facebook.com/redbooksire/posts',
-            'https://www.facebook.com/redbooksire/posts/',
-            'https://www.facebook.com/redbooksire'
+            'https://www.facebook.com/redbooksire',
+            'https://www.facebook.com/redbooksire/posts/'
           ];
+
+          const STATE_FILE = 'redbooks-state.json';
+
+          let state = {
+            lastPostId: null
+          };
+
+          if (fs.existsSync(STATE_FILE)) {
+            try {
+              state = JSON.parse(
+                fs.readFileSync(STATE_FILE, 'utf8')
+              );
+            } catch (e) {
+              console.log('Existing state could not be read.');
+            }
+          }
+
+          function extractPostId(url) {
+            if (!url) return null;
+
+            const match = url.match(/\/posts\/(pfbid[^/?#]+)/i);
+
+            if (match) {
+              return match[1];
+            }
+
+            const story = url.match(
+              /story_fbid=([^&]+)/i
+            );
+
+            if (story) {
+              return story[1];
+            }
+
+            return url;
+          }
+
+          async function sendNotification(postText, postUrl) {
+            const response = await fetch(
+              `https://ntfy.sh/${process.env.NTFY_TOPIC}`,
+              {
+                method: 'POST',
+
+                headers: {
+                  'Title': '📚 BOOK DROP!',
+                  'Priority': 'max',
+                  'Tags': 'books',
+                  'Click': postUrl
+                },
+
+                body:
+                  'New BOOK DROP posted by Red Books Ireland.\n\n' +
+                  postText.substring(0, 1000)
+              }
+            );
+
+            console.log(
+              'ntfy response:',
+              response.status
+            );
+
+            if (!response.ok) {
+              throw new Error(
+                'ntfy failed: ' +
+                await response.text()
+              );
+            }
+
+            console.log('NTFY notification sent.');
+          }
+
+          async function checkEndpoint(page, endpoint) {
+            console.log('');
+            console.log('==========================================');
+            console.log('Checking:', endpoint);
+            console.log('==========================================');
+
+            try {
+              const response = await page.goto(endpoint, {
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
+              });
+
+              console.log(
+                'HTTP:',
+                response ? response.status() : 'none'
+              );
+
+              await page.waitForTimeout(7000);
+
+              console.log('Final URL:', page.url());
+              console.log('Title:', await page.title());
+
+              // Look for actual Facebook post links.
+              const links = await page.locator(
+                'a[href*="/posts/"][href*="pfbid"],' +
+                'a[href*="/permalink.php"],' +
+                'a[href*="/story.php"]'
+              ).evaluateAll(elements =>
+                elements.map(a => ({
+                  href: a.href,
+                  text: (a.innerText || '').trim()
+                }))
+              );
+
+              const unique = [];
+              const seen = new Set();
+
+              for (const item of links) {
+                if (!seen.has(item.href)) {
+                  seen.add(item.href);
+                  unique.push(item);
+                }
+              }
+
+              console.log(
+                'Unique post links:',
+                unique.length
+              );
+
+              if (!unique.length) {
+                return null;
+              }
+
+              const postUrl = unique[0].href;
+              const postId = extractPostId(postUrl);
+
+              console.log('Latest post URL:', postUrl);
+              console.log('Latest post ID:', postId);
+
+              // First try the actual Facebook post article.
+              const article = page.locator(
+                'div[role="article"]'
+              ).filter({
+                has: page.locator(
+                  `a[href="${postUrl}"]`
+                )
+              }).first();
+
+              let postText = '';
+
+              if (await article.count()) {
+                // Expand "See more" if present.
+                const seeMore = article.locator(
+                  'div[role="button"]'
+                ).filter({
+                  hasText: /See more/i
+                }).first();
+
+                if (await seeMore.count()) {
+                  try {
+                    await seeMore.click({
+                      timeout: 2000
+                    });
+                    await page.waitForTimeout(500);
+                  } catch {}
+                }
+
+                // Use Facebook's post-body selectors first.
+                const body = article.locator(
+                  'div[data-ad-preview="message"],' +
+                  'div[data-ad-comet-preview="message"]'
+                ).first();
+
+                if (await body.count()) {
+                  postText = await body.innerText();
+                }
+
+                if (!postText) {
+                  postText = await article.innerText();
+                }
+              }
+
+              // Fallback to page text.
+              if (!postText) {
+                postText =
+                  await page.locator('body').innerText();
+              }
+
+              console.log('');
+              console.log('========== LATEST POST ==========');
+              console.log(
+                postText.substring(0, 5000)
+              );
+              console.log('========== END POST ==========');
+
+              return {
+                id: postId,
+                url: postUrl,
+                text: postText
+              };
+
+            } catch (error) {
+              console.log(
+                'Endpoint error:',
+                error.message
+              );
+
+              return null;
+            }
+          }
 
           (async () => {
             const browser = await chromium.launch({
               headless: true
             });
 
-            const page = await browser.newPage({
+            const context = await browser.newContext({
               viewport: {
                 width: 1280,
                 height: 1000
               },
+
               userAgent:
-                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 ' +
-                '(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+                'Mozilla/5.0 (X11; Linux x86_64) ' +
+                'AppleWebKit/537.36 ' +
+                '(KHTML, like Gecko) ' +
+                'Chrome/140.0.0.0 Safari/537.36'
             });
 
-            for (const endpoint of endpoints) {
-              console.log('');
-              console.log('========================================');
-              console.log('TESTING: ' + endpoint);
-              console.log('========================================');
+            const page = await context.newPage();
 
-              try {
-                const response = await page.goto(endpoint, {
-                  waitUntil: 'domcontentloaded',
-                  timeout: 60000
-                });
+            let latest = null;
 
+            for (const endpoint of ENDPOINTS) {
+              latest = await checkEndpoint(
+                page,
+                endpoint
+              );
+
+              if (latest) {
                 console.log(
-                  'HTTP STATUS: ' +
-                  (response ? response.status() : 'none')
+                  'Working endpoint:',
+                  endpoint
                 );
-
-                await page.waitForTimeout(8000);
-
-                console.log('FINAL URL: ' + page.url());
-                console.log('TITLE: ' + await page.title());
-
-                const posts = await page.locator(
-                  'a[href*="/posts/"][href*="pfbid"], ' +
-                  'a[href*="/permalink.php"], ' +
-                  'a[href*="/story.php"]'
-                ).evaluateAll(links =>
-                  links.map(a => ({
-                    href: a.href,
-                    text: (a.innerText || '').trim()
-                  }))
-                );
-
-                const unique = [];
-                const seen = new Set();
-
-                for (const post of posts) {
-                  if (!seen.has(post.href)) {
-                    seen.add(post.href);
-                    unique.push(post);
-                  }
-                }
-
-                console.log('POST LINKS FOUND: ' + unique.length);
-
-                if (unique.length > 0) {
-                  console.log('');
-                  console.log('LATEST POST URL:');
-                  console.log(unique[0].href);
-
-                  console.log('');
-                  console.log('POST LINK TEXT:');
-                  console.log(unique[0].text);
-
-                  const article = page.locator(
-                    'div[role="article"]'
-                  ).filter({
-                    has: page.locator(
-                      'a[href="' + unique[0].href + '"]'
-                    )
-                  }).first();
-
-                  let text = '';
-
-                  if (await article.count()) {
-                    text = await article.innerText();
-                  }
-
-                  if (!text) {
-                    text = await page.locator('body').innerText();
-                  }
-
-                  console.log('');
-                  console.log('========== LATEST POST TEXT ==========');
-                  console.log(text.substring(0, 5000));
-                  console.log('========== END POST TEXT ==========');
-
-                  console.log('');
-                  console.log(
-                    'BOOK DROP FOUND: ' +
-                    (text.toLowerCase().includes('book drop')
-                      ? 'YES'
-                      : 'NO')
-                  );
-                }
-
-              } catch (error) {
-                console.log('ERROR: ' + error.message);
+                break;
               }
             }
 
+            if (!latest) {
+              console.log('');
+              console.log(
+                'NO POST COULD BE RETRIEVED.'
+              );
+
+              await browser.close();
+
+              // Do not change state if Facebook failed.
+              process.exit(0);
+            }
+
+            const isBookDrop =
+              /\bbook\s+drop\b/i.test(
+                latest.text
+              );
+
+            console.log('');
+            console.log(
+              'BOOK DROP:',
+              isBookDrop ? 'YES' : 'NO'
+            );
+
+            console.log(
+              'Previous post ID:',
+              state.lastPostId
+            );
+
+            console.log(
+              'Current post ID:',
+              latest.id
+            );
+
+            // FIRST RUN
+            //
+            // Save the current post but don't notify.
+            if (!state.lastPostId) {
+              console.log('');
+              console.log(
+                'FIRST SUCCESSFUL RUN.'
+              );
+
+              console.log(
+                'Saving current post without notification.'
+              );
+
+              state.lastPostId = latest.id;
+
+              fs.writeFileSync(
+                STATE_FILE,
+                JSON.stringify(state, null, 2)
+              );
+
+              await browser.close();
+              process.exit(0);
+            }
+
+            // SAME POST
+            if (latest.id === state.lastPostId) {
+              console.log('');
+              console.log(
+                'Same post as previous check.'
+              );
+
+              console.log(
+                'No notification needed.'
+              );
+
+              await browser.close();
+              process.exit(0);
+            }
+
+            // NEW POST
+            console.log('');
+            console.log(
+              '=========================================='
+            );
+            console.log(
+              'NEW POST DETECTED'
+            );
+            console.log(
+              '=========================================='
+            );
+
+            state.lastPostId = latest.id;
+
+            fs.writeFileSync(
+              STATE_FILE,
+              JSON.stringify(state, null, 2)
+            );
+
+            if (isBookDrop) {
+              await sendNotification(
+                latest.text,
+                latest.url
+              );
+            } else {
+              console.log(
+                'New post is not a BOOK DROP.'
+              );
+            }
+
             await browser.close();
-          })();
+
+          })().catch(error => {
+            console.error(error);
+            process.exit(1);
+          });
           EOF
 
-          node test.js
+          node monitor.js
+
+      - name: Save monitor state
+        if: always()
+        run: |
+          if [ -f redbooks-state.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add redbooks-state.json
+
+            if git diff --cached --quiet; then
+              echo "No state changes."
+            else
+              git commit -m "Update Red Books monitor state"
+              git push
+            fi
+          else
+            echo "No state file."
+          fi

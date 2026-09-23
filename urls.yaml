@@ -9,7 +9,7 @@ treat_new_as_changed: false
 
 filter:
   - html2text
-  - grep: "(?i)\bbook\s*[-–—]?\s*drop\b"
+  - grep: '(?i)\bbook\s*[-–—]?\s*drop\b'
   - strip
 
 tags:

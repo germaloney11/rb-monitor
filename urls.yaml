@@ -1,5 +1,5 @@
 kind: url
-name: "Red Books Ireland - BOOK DROP"
+name: "Red Books Ireland - DIAGNOSTIC"
 url: "https://www.facebook.com/redbooksire"
 useragent: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
 timeout: 30
@@ -9,7 +9,6 @@ treat_new_as_changed: false
 
 filter:
   - html2text
-  - grep: '(?i)\bbook\s*[-–—]?\s*drop\b'
   - strip
 
 tags:

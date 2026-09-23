@@ -1,22 +1,19 @@
-name: Red Books BOOK DROP (mbasic)
-url: https://mbasic.facebook.com/redbooksire
+name: "Red Books Ireland - BOOK DROP"
+url: "https://www.facebook.com/redbooksire"
+useragent: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+timeout: 30
+max_tries: 3
+ignore_connection_errors: true
+treat_new_as_changed: false
+
 filter:
   - html2text
-  - grep: "(?i)book.?drop"
+  - grep: "(?i)book[[:space:]]*[-–—]?[[:space:]]*drop"
   - strip
 
----
-name: Red Books BOOK DROP (m)
-url: https://m.facebook.com/redbooksire
-filter:
-  - html2text
-  - grep: "(?i)book.?drop"
-  - strip
+diff_filter:
+  - grep: "^[+]"
+  - grepi: "^[+]{3}"
 
----
-name: Red Books BOOK DROP (www)
-url: https://www.facebook.com/redbooksire
-filter:
-  - html2text
-  - grep: "(?i)book.?drop"
-  - strip
+tags:
+  - redbooks

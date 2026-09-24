@@ -1,4 +1,4 @@
-# Re-enabled + force schedule - 23 Sep 2026
+# Improved post detection - 24 Sep 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -34,7 +34,7 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
-- name: Check Red Books
+      - name: Check Red Books
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
@@ -104,14 +104,12 @@ jobs:
               console.log('Final URL:', page.url());
               console.log('Title:', await page.title());
 
-              // Wait and scroll to trigger more content
               await page.waitForTimeout(3000);
               await page.evaluate(() => window.scrollBy(0, 1500));
               await page.waitForTimeout(2000);
               await page.evaluate(() => window.scrollBy(0, 1500));
               await page.waitForTimeout(2000);
 
-              // Diagnostic: check for login wall
               const bodyText = await page.locator('body').innerText();
               if (/log in|sign up|create new account|you must log in/i.test(bodyText.substring(0, 2000))) {
                 console.log('WARNING: Possible login wall detected.');
@@ -119,7 +117,6 @@ jobs:
 
               console.log('Page text length:', bodyText.length);
 
-              // Try multiple ways to find posts
               const postSelectors = [
                 'div[role="article"]',
                 'div[data-pagelet*="FeedUnit"]',
@@ -140,20 +137,17 @@ jobs:
 
               if (!articles || await articles.count() === 0) {
                 console.log('No articles found with any selector.');
-                // Fallback: look for any links that look like posts
                 const links = await page.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').all();
                 console.log('Post-like links found:', links.length);
                 if (links.length === 0) return null;
               }
 
-              // Get the first real post
               const firstArticle = articles ? articles.first() : null;
               let postText = '';
               let postUrl = page.url();
               let postId = null;
 
               if (firstArticle) {
-                // Try to get the post link
                 const link = firstArticle.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').first();
                 if (await link.count()) {
                   postUrl = await link.getAttribute('href');
@@ -163,7 +157,6 @@ jobs:
                   postId = extractPostId(postUrl);
                 }
 
-                // Get text content
                 const messageSelectors = [
                   'div[data-ad-preview="message"]',
                   'div[data-ad-comet-preview="message"]',
@@ -183,7 +176,6 @@ jobs:
                 }
               }
 
-              // Last resort fallback
               if (!postText || postText.length < 30) {
                 postText = bodyText.substring(0, 3000);
               }
@@ -218,7 +210,6 @@ jobs:
               locale: 'en-IE'
             });
 
-            // Hide webdriver flag
             await context.addInitScript(() => {
               Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             });
@@ -245,7 +236,6 @@ jobs:
             console.log('Previous post ID:', state.lastPostId);
             console.log('Current post ID:', latest.id);
 
-            // First run - just save state
             if (!state.lastPostId) {
               console.log('FIRST RUN - saving state without notification.');
               state.lastPostId = latest.id;
@@ -254,14 +244,12 @@ jobs:
               process.exit(0);
             }
 
-            // Same post
             if (latest.id === state.lastPostId) {
               console.log('Same post as last check. No notification needed.');
               await browser.close();
               process.exit(0);
             }
 
-            // New post found
             console.log('\n===== NEW POST DETECTED =====');
             state.lastPostId = latest.id;
             fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
@@ -287,9 +275,7 @@ jobs:
           if [ -f redbooks-state.json ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
             git add redbooks-state.json
-
             if git diff --cached --quiet; then
               echo "No state changes."
             else

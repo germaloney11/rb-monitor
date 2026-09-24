@@ -34,7 +34,7 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
-      - name: Check Red Books
+- name: Check Red Books
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
@@ -50,353 +50,231 @@ jobs:
           const ENDPOINTS = [
             'https://www.facebook.com/redbooksire/posts',
             'https://www.facebook.com/redbooksire',
-            'https://www.facebook.com/redbooksire/posts/'
+            'https://m.facebook.com/redbooksire',
+            'https://mbasic.facebook.com/redbooksire'
           ];
 
           const STATE_FILE = 'redbooks-state.json';
 
-          let state = {
-            lastPostId: null
-          };
-
+          let state = { lastPostId: null };
           if (fs.existsSync(STATE_FILE)) {
             try {
-              state = JSON.parse(
-                fs.readFileSync(STATE_FILE, 'utf8')
-              );
+              state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
             } catch (e) {
-              console.log('Existing state could not be read.');
+              console.log('Could not read existing state.');
             }
           }
 
           function extractPostId(url) {
             if (!url) return null;
-
-            const match = url.match(/\/posts\/(pfbid[^/?#]+)/i);
-
-            if (match) {
-              return match[1];
-            }
-
-            const story = url.match(
-              /story_fbid=([^&]+)/i
-            );
-
-            if (story) {
-              return story[1];
-            }
-
-            return url;
+            const match = url.match(/\/posts\/(pfbid[^/?#]+)/i) ||
+                          url.match(/story_fbid=([^&]+)/i) ||
+                          url.match(/\/permalink\.php\?story_fbid=([^&]+)/i);
+            return match ? match[1] : url;
           }
 
           async function sendNotification(postText, postUrl) {
-            const response = await fetch(
-              `https://ntfy.sh/${process.env.NTFY_TOPIC}`,
-              {
-                method: 'POST',
-
-                headers: {
-                  'Title': '📚 BOOK DROP!',
-                  'Priority': 'max',
-                  'Tags': 'books',
-                  'Click': postUrl
-                },
-
-                body:
-                  'New BOOK DROP posted by Red Books Ireland.\n\n' +
-                  postText.substring(0, 1000)
-              }
-            );
-
-            console.log(
-              'ntfy response:',
-              response.status
-            );
-
-            if (!response.ok) {
-              throw new Error(
-                'ntfy failed: ' +
-                await response.text()
-              );
-            }
-
+            const response = await fetch(`https://ntfy.sh/${process.env.NTFY_TOPIC}`, {
+              method: 'POST',
+              headers: {
+                'Title': '📚 BOOK DROP!',
+                'Priority': 'max',
+                'Tags': 'books',
+                'Click': postUrl
+              },
+              body: 'New BOOK DROP posted by Red Books Ireland.\n\n' + postText.substring(0, 1000)
+            });
+            console.log('ntfy response:', response.status);
+            if (!response.ok) throw new Error('ntfy failed: ' + await response.text());
             console.log('NTFY notification sent.');
           }
 
           async function checkEndpoint(page, endpoint) {
-            console.log('');
-            console.log('==========================================');
+            console.log('\n==========================================');
             console.log('Checking:', endpoint);
             console.log('==========================================');
 
             try {
               const response = await page.goto(endpoint, {
                 waitUntil: 'domcontentloaded',
-                timeout: 60000
+                timeout: 45000
               });
 
-              console.log(
-                'HTTP:',
-                response ? response.status() : 'none'
-              );
-
-              await page.waitForTimeout(7000);
-
+              console.log('HTTP:', response ? response.status() : 'unknown');
               console.log('Final URL:', page.url());
               console.log('Title:', await page.title());
 
-              // Look for actual Facebook post links.
-              const links = await page.locator(
-                'a[href*="/posts/"][href*="pfbid"],' +
-                'a[href*="/permalink.php"],' +
-                'a[href*="/story.php"]'
-              ).evaluateAll(elements =>
-                elements.map(a => ({
-                  href: a.href,
-                  text: (a.innerText || '').trim()
-                }))
-              );
+              // Wait and scroll to trigger more content
+              await page.waitForTimeout(3000);
+              await page.evaluate(() => window.scrollBy(0, 1500));
+              await page.waitForTimeout(2000);
+              await page.evaluate(() => window.scrollBy(0, 1500));
+              await page.waitForTimeout(2000);
 
-              const unique = [];
-              const seen = new Set();
+              // Diagnostic: check for login wall
+              const bodyText = await page.locator('body').innerText();
+              if (/log in|sign up|create new account|you must log in/i.test(bodyText.substring(0, 2000))) {
+                console.log('WARNING: Possible login wall detected.');
+              }
 
-              for (const item of links) {
-                if (!seen.has(item.href)) {
-                  seen.add(item.href);
-                  unique.push(item);
+              console.log('Page text length:', bodyText.length);
+
+              // Try multiple ways to find posts
+              const postSelectors = [
+                'div[role="article"]',
+                'div[data-pagelet*="FeedUnit"]',
+                'div.userContentWrapper',
+                'div[data-ft]',
+                'article'
+              ];
+
+              let articles = null;
+              for (const sel of postSelectors) {
+                const count = await page.locator(sel).count();
+                console.log(`Selector "${sel}": ${count} found`);
+                if (count > 0) {
+                  articles = page.locator(sel);
+                  break;
                 }
               }
 
-              console.log(
-                'Unique post links:',
-                unique.length
-              );
-
-              if (!unique.length) {
-                return null;
+              if (!articles || await articles.count() === 0) {
+                console.log('No articles found with any selector.');
+                // Fallback: look for any links that look like posts
+                const links = await page.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').all();
+                console.log('Post-like links found:', links.length);
+                if (links.length === 0) return null;
               }
 
-              const postUrl = unique[0].href;
-              const postId = extractPostId(postUrl);
-
-              console.log('Latest post URL:', postUrl);
-              console.log('Latest post ID:', postId);
-
-              // First try the actual Facebook post article.
-              const article = page.locator(
-                'div[role="article"]'
-              ).filter({
-                has: page.locator(
-                  `a[href="${postUrl}"]`
-                )
-              }).first();
-
+              // Get the first real post
+              const firstArticle = articles ? articles.first() : null;
               let postText = '';
+              let postUrl = page.url();
+              let postId = null;
 
-              if (await article.count()) {
-                // Expand "See more" if present.
-                const seeMore = article.locator(
-                  'div[role="button"]'
-                ).filter({
-                  hasText: /See more/i
-                }).first();
-
-                if (await seeMore.count()) {
-                  try {
-                    await seeMore.click({
-                      timeout: 2000
-                    });
-                    await page.waitForTimeout(500);
-                  } catch {}
+              if (firstArticle) {
+                // Try to get the post link
+                const link = firstArticle.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').first();
+                if (await link.count()) {
+                  postUrl = await link.getAttribute('href');
+                  if (postUrl && !postUrl.startsWith('http')) {
+                    postUrl = 'https://www.facebook.com' + postUrl;
+                  }
+                  postId = extractPostId(postUrl);
                 }
 
-                // Use Facebook's post-body selectors first.
-                const body = article.locator(
-                  'div[data-ad-preview="message"],' +
-                  'div[data-ad-comet-preview="message"]'
-                ).first();
+                // Get text content
+                const messageSelectors = [
+                  'div[data-ad-preview="message"]',
+                  'div[data-ad-comet-preview="message"]',
+                  'div[dir="auto"]'
+                ];
 
-                if (await body.count()) {
-                  postText = await body.innerText();
+                for (const sel of messageSelectors) {
+                  const el = firstArticle.locator(sel).first();
+                  if (await el.count()) {
+                    postText = await el.innerText();
+                    if (postText && postText.length > 20) break;
+                  }
                 }
 
                 if (!postText) {
-                  postText = await article.innerText();
+                  postText = await firstArticle.innerText();
                 }
               }
 
-              // Fallback to page text.
-              if (!postText) {
-                postText =
-                  await page.locator('body').innerText();
+              // Last resort fallback
+              if (!postText || postText.length < 30) {
+                postText = bodyText.substring(0, 3000);
               }
 
-              console.log('');
-              console.log('========== LATEST POST ==========');
-              console.log(
-                postText.substring(0, 5000)
-              );
+              console.log('\n========== LATEST POST ==========');
+              console.log(postText.substring(0, 1500));
               console.log('========== END POST ==========');
+              console.log('Post ID:', postId);
+              console.log('Post URL:', postUrl);
 
               return {
-                id: postId,
+                id: postId || 'unknown-' + Date.now(),
                 url: postUrl,
                 text: postText
               };
 
             } catch (error) {
-              console.log(
-                'Endpoint error:',
-                error.message
-              );
-
+              console.log('Endpoint error:', error.message);
               return null;
             }
           }
 
           (async () => {
             const browser = await chromium.launch({
-              headless: true
+              headless: true,
+              args: ['--disable-blink-features=AutomationControlled']
             });
 
             const context = await browser.newContext({
-              viewport: {
-                width: 1280,
-                height: 1000
-              },
+              viewport: { width: 1280, height: 900 },
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+              locale: 'en-IE'
+            });
 
-              userAgent:
-                'Mozilla/5.0 (X11; Linux x86_64) ' +
-                'AppleWebKit/537.36 ' +
-                '(KHTML, like Gecko) ' +
-                'Chrome/140.0.0.0 Safari/537.36'
+            // Hide webdriver flag
+            await context.addInitScript(() => {
+              Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             });
 
             const page = await context.newPage();
-
             let latest = null;
 
             for (const endpoint of ENDPOINTS) {
-              latest = await checkEndpoint(
-                page,
-                endpoint
-              );
-
-              if (latest) {
-                console.log(
-                  'Working endpoint:',
-                  endpoint
-                );
+              latest = await checkEndpoint(page, endpoint);
+              if (latest && latest.text && latest.text.length > 50) {
+                console.log('Working endpoint:', endpoint);
                 break;
               }
             }
 
-            if (!latest) {
-              console.log('');
-              console.log(
-                'NO POST COULD BE RETRIEVED.'
-              );
-
+            if (!latest || !latest.text) {
+              console.log('\nNO POST COULD BE RETRIEVED.');
               await browser.close();
-
-              // Do not change state if Facebook failed.
               process.exit(0);
             }
 
-            const isBookDrop =
-              /\bbook\s+drop\b/i.test(
-                latest.text
-              );
+            const isBookDrop = /\bbook\s*drop\b/i.test(latest.text);
+            console.log('\nBOOK DROP detected:', isBookDrop ? 'YES' : 'NO');
+            console.log('Previous post ID:', state.lastPostId);
+            console.log('Current post ID:', latest.id);
 
-            console.log('');
-            console.log(
-              'BOOK DROP:',
-              isBookDrop ? 'YES' : 'NO'
-            );
-
-            console.log(
-              'Previous post ID:',
-              state.lastPostId
-            );
-
-            console.log(
-              'Current post ID:',
-              latest.id
-            );
-
-            // FIRST RUN
-            //
-            // Save the current post but don't notify.
+            // First run - just save state
             if (!state.lastPostId) {
-              console.log('');
-              console.log(
-                'FIRST SUCCESSFUL RUN.'
-              );
-
-              console.log(
-                'Saving current post without notification.'
-              );
-
+              console.log('FIRST RUN - saving state without notification.');
               state.lastPostId = latest.id;
-
-              fs.writeFileSync(
-                STATE_FILE,
-                JSON.stringify(state, null, 2)
-              );
-
+              fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
               await browser.close();
               process.exit(0);
             }
 
-            // SAME POST
+            // Same post
             if (latest.id === state.lastPostId) {
-              console.log('');
-              console.log(
-                'Same post as previous check.'
-              );
-
-              console.log(
-                'No notification needed.'
-              );
-
+              console.log('Same post as last check. No notification needed.');
               await browser.close();
               process.exit(0);
             }
 
-            // NEW POST
-            console.log('');
-            console.log(
-              '=========================================='
-            );
-            console.log(
-              'NEW POST DETECTED'
-            );
-            console.log(
-              '=========================================='
-            );
-
+            // New post found
+            console.log('\n===== NEW POST DETECTED =====');
             state.lastPostId = latest.id;
-
-            fs.writeFileSync(
-              STATE_FILE,
-              JSON.stringify(state, null, 2)
-            );
+            fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
             if (isBookDrop) {
-              await sendNotification(
-                latest.text,
-                latest.url
-              );
+              await sendNotification(latest.text, latest.url);
             } else {
-              console.log(
-                'New post is not a BOOK DROP.'
-              );
+              console.log('New post is not a BOOK DROP.');
             }
 
             await browser.close();
-
-          })().catch(error => {
-            console.error(error);
+          })().catch(err => {
+            console.error(err);
             process.exit(1);
           });
           EOF

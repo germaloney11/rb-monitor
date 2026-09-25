@@ -1,4 +1,4 @@
-# Fixed ntfy emoji crash - 25 Sep 2026
+# More flexible BOOK DROP detection - 25 Sep 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -231,7 +231,8 @@ jobs:
               process.exit(0);
             }
 
-            const isBookDrop = /\bbook\s*drop\b/i.test(latest.text);
+            // More flexible match - works even with emoji or punctuation stuck to the words
+            const isBookDrop = /book\s*drop/i.test(latest.text);
             console.log('\nBOOK DROP detected:', isBookDrop ? 'YES' : 'NO');
             console.log('Previous post ID:', state.lastPostId);
             console.log('Current post ID:', latest.id);

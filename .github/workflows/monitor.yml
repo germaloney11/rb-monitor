@@ -1,4 +1,4 @@
-# Improved post detection - 24 Sep 2026
+# Fixed short post text detection - 25 Sep 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -167,7 +167,7 @@ jobs:
                   const el = firstArticle.locator(sel).first();
                   if (await el.count()) {
                     postText = await el.innerText();
-                    if (postText && postText.length > 20) break;
+                    if (postText && postText.length > 10) break;
                   }
                 }
 
@@ -176,7 +176,7 @@ jobs:
                 }
               }
 
-              if (!postText || postText.length < 30) {
+              if (!postText || postText.length < 10) {
                 postText = bodyText.substring(0, 3000);
               }
 
@@ -219,7 +219,8 @@ jobs:
 
             for (const endpoint of ENDPOINTS) {
               latest = await checkEndpoint(page, endpoint);
-              if (latest && latest.text && latest.text.length > 50) {
+              // Accept any post that has text and a real post ID
+              if (latest && latest.text && latest.id && !latest.id.startsWith('unknown-')) {
                 console.log('Working endpoint:', endpoint);
                 break;
               }

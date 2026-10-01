@@ -1,10 +1,9 @@
-# More flexible BOOK DROP detection - 25 Sep 2026
+# Red Books BOOK DROP Monitor - fixed concurrency + state push - 1 Oct 2026
 name: Red Books BOOK DROP Monitor
 
 on:
   schedule:
     - cron: '*/5 17-21 * * *'
-      timezone: 'Europe/Dublin'
   workflow_dispatch:
 
 permissions:
@@ -12,7 +11,7 @@ permissions:
 
 concurrency:
   group: red-books-monitor
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   monitor:
@@ -280,8 +279,9 @@ jobs:
             if git diff --cached --quiet; then
               echo "No state changes."
             else
-              git commit -m "Update Red Books monitor state"
-              git push
+              git commit -m "Update Red Books monitor state" || true
+              git pull --rebase origin main || git pull --rebase --autostash origin main || true
+              git push origin main || echo "Push failed after retry; next run will catch up."
             fi
           else
             echo "No state file."

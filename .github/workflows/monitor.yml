@@ -1,4 +1,4 @@
-# Red Books BOOK DROP Monitor - fixed concurrency + state push - 1 Oct 2026
+# Red Books BOOK DROP Monitor - cache + concurrency fixes - 1 Oct 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -28,10 +28,16 @@ jobs:
         with:
           node-version: 22
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: \~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-v1
+
       - name: Install Playwright
         run: |
           npm install playwright
-          npx playwright install chromium --with-deps
+          npx playwright install chromium
 
       - name: Check Red Books
         env:

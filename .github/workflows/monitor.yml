@@ -1,4 +1,4 @@
-# Red Books BOOK DROP Monitor - cache + concurrency fixes - 1 Oct 2026
+# Red Books BOOK DROP Monitor - lastBookDropId fix (no duplicate ntfy) - 3 Oct 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -61,10 +61,11 @@ jobs:
 
           const STATE_FILE = 'redbooks-state.json';
 
-          let state = { lastPostId: null };
+          let state = { lastPostId: null, lastBookDropId: null };
           if (fs.existsSync(STATE_FILE)) {
             try {
               state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+              if (!state.lastBookDropId) state.lastBookDropId = null;
             } catch (e) {
               console.log('Could not read existing state.');
             }
@@ -236,34 +237,39 @@ jobs:
               process.exit(0);
             }
 
-            // More flexible match - works even with emoji or punctuation stuck to the words
             const isBookDrop = /book\s*drop/i.test(latest.text);
             console.log('\nBOOK DROP detected:', isBookDrop ? 'YES' : 'NO');
             console.log('Previous post ID:', state.lastPostId);
+            console.log('Previous BOOK DROP ID:', state.lastBookDropId);
             console.log('Current post ID:', latest.id);
 
-            if (!state.lastPostId) {
+            // Always remember whatever we last saw (for logging)
+            state.lastPostId = latest.id;
+
+            // First ever run: seed state, no notification
+            if (!state.lastBookDropId && !state.lastPostId) {
               console.log('FIRST RUN - saving state without notification.');
-              state.lastPostId = latest.id;
+              if (isBookDrop) state.lastBookDropId = latest.id;
               fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
               await browser.close();
               process.exit(0);
             }
 
-            if (latest.id === state.lastPostId) {
-              console.log('Same post as last check. No notification needed.');
-              await browser.close();
-              process.exit(0);
-            }
-
-            console.log('\n===== NEW POST DETECTED =====');
-            state.lastPostId = latest.id;
-            fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-
+            // Only BOOK DROP posts can trigger ntfy, and only if ID is new
             if (isBookDrop) {
-              await sendNotification(latest.text, latest.url);
+              if (latest.id !== state.lastBookDropId) {
+                console.log('\n===== NEW BOOK DROP DETECTED =====');
+                state.lastBookDropId = latest.id;
+                fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+                await sendNotification(latest.text, latest.url);
+              } else {
+                console.log('Same BOOK DROP as before. No notification.');
+                fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+              }
             } else {
-              console.log('New post is not a BOOK DROP.');
+              console.log('Post is not a BOOK DROP. State updated (lastPostId only).');
+              // Do NOT change lastBookDropId — that is what stops duplicates
+              fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
             }
 
             await browser.close();

@@ -1,4 +1,4 @@
-# Red Books BOOK DROP Monitor - lastBookDropId fix (no duplicate ntfy) - 3 Oct 2026
+# Red Books BOOK DROP Monitor - fingerprint dedup (no false repeats) - 4 Oct 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -51,6 +51,7 @@ jobs:
           cat > monitor.js <<'EOF'
           const { chromium } = require('playwright');
           const fs = require('fs');
+          const crypto = require('crypto');
 
           const ENDPOINTS = [
             'https://www.facebook.com/redbooksire/posts',
@@ -61,11 +62,18 @@ jobs:
 
           const STATE_FILE = 'redbooks-state.json';
 
-          let state = { lastPostId: null, lastBookDropId: null };
+          let state = {
+            lastPostId: null,
+            lastBookDropId: null,
+            lastBookDropFingerprint: null,
+            seenBookDropIds: []
+          };
+
           if (fs.existsSync(STATE_FILE)) {
             try {
-              state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-              if (!state.lastBookDropId) state.lastBookDropId = null;
+              const loaded = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+              state = { ...state, ...loaded };
+              if (!Array.isArray(state.seenBookDropIds)) state.seenBookDropIds = [];
             } catch (e) {
               console.log('Could not read existing state.');
             }
@@ -77,6 +85,29 @@ jobs:
                           url.match(/story_fbid=([^&]+)/i) ||
                           url.match(/\/permalink\.php\?story_fbid=([^&]+)/i);
             return match ? match[1] : url;
+          }
+
+          // Stable fingerprint of BOOK DROP content (ignores changing pfbid)
+          function bookDropFingerprint(text) {
+            if (!text) return null;
+            // Prefer the line that contains "book drop"
+            const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+            let line = lines.find(s => /book\s*drop/i.test(s)) || lines[0] || text.substring(0, 120);
+            // Normalize: uppercase, collapse spaces, strip most punctuation/emoji noise
+            line = line
+              .toUpperCase()
+              .replace(/[^\w\s]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            // Short hash of full normalized text as backup uniqueness
+            const normalizedFull = text
+              .toUpperCase()
+              .replace(/[^\w\s]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .substring(0, 300);
+            const hash = crypto.createHash('sha256').update(normalizedFull).digest('hex').substring(0, 16);
+            return line + '|' + hash;
           }
 
           async function sendNotification(postText, postUrl) {
@@ -238,37 +269,56 @@ jobs:
             }
 
             const isBookDrop = /book\s*drop/i.test(latest.text);
+            const fingerprint = isBookDrop ? bookDropFingerprint(latest.text) : null;
+
             console.log('\nBOOK DROP detected:', isBookDrop ? 'YES' : 'NO');
             console.log('Previous post ID:', state.lastPostId);
             console.log('Previous BOOK DROP ID:', state.lastBookDropId);
+            console.log('Previous BOOK DROP fingerprint:', state.lastBookDropFingerprint);
             console.log('Current post ID:', latest.id);
+            console.log('Current fingerprint:', fingerprint);
 
-            // Always remember whatever we last saw (for logging)
+            // Always update last seen post id
             state.lastPostId = latest.id;
 
-            // First ever run: seed state, no notification
-            if (!state.lastBookDropId && !state.lastPostId) {
+            // First run ever: seed state, never notify
+            if (!state.lastBookDropId && !state.lastBookDropFingerprint && state.seenBookDropIds.length === 0) {
               console.log('FIRST RUN - saving state without notification.');
-              if (isBookDrop) state.lastBookDropId = latest.id;
+              if (isBookDrop) {
+                state.lastBookDropId = latest.id;
+                state.lastBookDropFingerprint = fingerprint;
+                state.seenBookDropIds = [latest.id];
+              }
               fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
               await browser.close();
               process.exit(0);
             }
 
-            // Only BOOK DROP posts can trigger ntfy, and only if ID is new
             if (isBookDrop) {
-              if (latest.id !== state.lastBookDropId) {
+              const idSeen = state.seenBookDropIds.includes(latest.id) || latest.id === state.lastBookDropId;
+              const sameContent = fingerprint && fingerprint === state.lastBookDropFingerprint;
+
+              if (idSeen || sameContent) {
+                console.log('Same BOOK DROP as before (id or content match). No notification.');
+                // Still record this pfbid variant so future scrapes of it are recognized
+                if (!state.seenBookDropIds.includes(latest.id)) {
+                  state.seenBookDropIds.push(latest.id);
+                  state.seenBookDropIds = state.seenBookDropIds.slice(-30);
+                }
+                if (!state.lastBookDropFingerprint) state.lastBookDropFingerprint = fingerprint;
+                fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+              } else {
                 console.log('\n===== NEW BOOK DROP DETECTED =====');
                 state.lastBookDropId = latest.id;
+                state.lastBookDropFingerprint = fingerprint;
+                state.seenBookDropIds.push(latest.id);
+                state.seenBookDropIds = state.seenBookDropIds.slice(-30);
                 fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
                 await sendNotification(latest.text, latest.url);
-              } else {
-                console.log('Same BOOK DROP as before. No notification.');
-                fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
               }
             } else {
               console.log('Post is not a BOOK DROP. State updated (lastPostId only).');
-              // Do NOT change lastBookDropId — that is what stops duplicates
+              // Never clear lastBookDropId / fingerprint
               fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
             }
 

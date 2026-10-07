@@ -1,4 +1,4 @@
-# Red Books BOOK DROP Monitor - fingerprint dedup (no false repeats) - 4 Oct 2026
+# Red Books BOOK DROP Monitor - scan all articles + fingerprint - 8 Oct 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -31,8 +31,8 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: \~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-v1
+          path: /home/runner/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-v2
 
       - name: Install Playwright
         run: |
@@ -84,22 +84,14 @@ jobs:
             const match = url.match(/\/posts\/(pfbid[^/?#]+)/i) ||
                           url.match(/story_fbid=([^&]+)/i) ||
                           url.match(/\/permalink\.php\?story_fbid=([^&]+)/i);
-            return match ? match[1] : url;
+            return match ? match[1] : null;
           }
 
-          // Stable fingerprint of BOOK DROP content (ignores changing pfbid)
           function bookDropFingerprint(text) {
             if (!text) return null;
-            // Prefer the line that contains "book drop"
             const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
             let line = lines.find(s => /book\s*drop/i.test(s)) || lines[0] || text.substring(0, 120);
-            // Normalize: uppercase, collapse spaces, strip most punctuation/emoji noise
-            line = line
-              .toUpperCase()
-              .replace(/[^\w\s]/g, ' ')
-              .replace(/\s+/g, ' ')
-              .trim();
-            // Short hash of full normalized text as backup uniqueness
+            line = line.toUpperCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
             const normalizedFull = text
               .toUpperCase()
               .replace(/[^\w\s]/g, ' ')
@@ -117,13 +109,86 @@ jobs:
                 'Title': 'BOOK DROP!',
                 'Priority': 'max',
                 'Tags': 'books',
-                'Click': postUrl
+                'Click': postUrl || 'https://www.facebook.com/redbooksire'
               },
               body: 'New BOOK DROP posted by Red Books Ireland.\n\n' + postText.substring(0, 1000)
             });
             console.log('ntfy response:', response.status);
             if (!response.ok) throw new Error('ntfy failed: ' + await response.text());
             console.log('NTFY notification sent.');
+          }
+
+          async function extractArticles(page) {
+            const postSelectors = [
+              'div[role="article"]',
+              'div[data-pagelet*="FeedUnit"]',
+              'div.userContentWrapper',
+              'div[data-ft]',
+              'article'
+            ];
+
+            let articles = null;
+            for (const sel of postSelectors) {
+              const count = await page.locator(sel).count();
+              console.log(`Selector "${sel}": ${count} found`);
+              if (count > 0) {
+                articles = page.locator(sel);
+                break;
+              }
+            }
+            if (!articles) return [];
+
+            const total = Math.min(await articles.count(), 8);
+            const results = [];
+
+            for (let i = 0; i < total; i++) {
+              const article = articles.nth(i);
+              let postText = '';
+              let postUrl = null;
+              let postId = null;
+
+              try {
+                const link = article.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').first();
+                if (await link.count()) {
+                  postUrl = await link.getAttribute('href');
+                  if (postUrl && !postUrl.startsWith('http')) {
+                    postUrl = 'https://www.facebook.com' + postUrl;
+                  }
+                  postId = extractPostId(postUrl);
+                }
+
+                const messageSelectors = [
+                  'div[data-ad-preview="message"]',
+                  'div[data-ad-comet-preview="message"]',
+                  'div[dir="auto"]'
+                ];
+                for (const sel of messageSelectors) {
+                  const el = article.locator(sel).first();
+                  if (await el.count()) {
+                    const t = await el.innerText();
+                    if (t && t.length > 10) {
+                      postText = t;
+                      break;
+                    }
+                  }
+                }
+                if (!postText) {
+                  postText = await article.innerText();
+                }
+              } catch (e) {
+                console.log('Article', i, 'extract error:', e.message);
+                continue;
+              }
+
+              if (postText && postText.length > 5) {
+                results.push({
+                  id: postId || ('unknown-' + i + '-' + Date.now()),
+                  url: postUrl || page.url(),
+                  text: postText
+                });
+              }
+            }
+            return results;
           }
 
           async function checkEndpoint(page, endpoint) {
@@ -141,94 +206,43 @@ jobs:
               console.log('Final URL:', page.url());
               console.log('Title:', await page.title());
 
-              await page.waitForTimeout(3000);
-              await page.evaluate(() => window.scrollBy(0, 1500));
-              await page.waitForTimeout(2000);
-              await page.evaluate(() => window.scrollBy(0, 1500));
-              await page.waitForTimeout(2000);
+              await page.waitForTimeout(4000);
+              await page.evaluate(() => window.scrollBy(0, 2000));
+              await page.waitForTimeout(2500);
+              await page.evaluate(() => window.scrollBy(0, 2000));
+              await page.waitForTimeout(2500);
 
               const bodyText = await page.locator('body').innerText();
-              if (/log in|sign up|create new account|you must log in/i.test(bodyText.substring(0, 2000))) {
+              const loginWall = /log in|sign up|create new account|you must log in/i.test(bodyText.substring(0, 2000));
+              if (loginWall) {
                 console.log('WARNING: Possible login wall detected.');
+                // Extra scroll/wait — sometimes more posts appear
+                await page.evaluate(() => window.scrollBy(0, 2500));
+                await page.waitForTimeout(3000);
               }
 
               console.log('Page text length:', bodyText.length);
 
-              const postSelectors = [
-                'div[role="article"]',
-                'div[data-pagelet*="FeedUnit"]',
-                'div.userContentWrapper',
-                'div[data-ft]',
-                'article'
-              ];
+              const articles = await extractArticles(page);
+              console.log('Articles extracted:', articles.length);
 
-              let articles = null;
-              for (const sel of postSelectors) {
-                const count = await page.locator(sel).count();
-                console.log(`Selector "${sel}": ${count} found`);
-                if (count > 0) {
-                  articles = page.locator(sel);
-                  break;
-                }
+              if (articles.length === 0) {
+                console.log('No articles found.');
+                return null;
               }
 
-              if (!articles || await articles.count() === 0) {
-                console.log('No articles found with any selector.');
-                const links = await page.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').all();
-                console.log('Post-like links found:', links.length);
-                if (links.length === 0) return null;
-              }
+              // Prefer a BOOK DROP article if any is present
+              const bookDropArticle = articles.find(a => /book\s*drop/i.test(a.text));
+              const chosen = bookDropArticle || articles[0];
 
-              const firstArticle = articles ? articles.first() : null;
-              let postText = '';
-              let postUrl = page.url();
-              let postId = null;
-
-              if (firstArticle) {
-                const link = firstArticle.locator('a[href*="/posts/"], a[href*="story_fbid"], a[href*="permalink"]').first();
-                if (await link.count()) {
-                  postUrl = await link.getAttribute('href');
-                  if (postUrl && !postUrl.startsWith('http')) {
-                    postUrl = 'https://www.facebook.com' + postUrl;
-                  }
-                  postId = extractPostId(postUrl);
-                }
-
-                const messageSelectors = [
-                  'div[data-ad-preview="message"]',
-                  'div[data-ad-comet-preview="message"]',
-                  'div[dir="auto"]'
-                ];
-
-                for (const sel of messageSelectors) {
-                  const el = firstArticle.locator(sel).first();
-                  if (await el.count()) {
-                    postText = await el.innerText();
-                    if (postText && postText.length > 10) break;
-                  }
-                }
-
-                if (!postText) {
-                  postText = await firstArticle.innerText();
-                }
-              }
-
-              if (!postText || postText.length < 10) {
-                postText = bodyText.substring(0, 3000);
-              }
-
-              console.log('\n========== LATEST POST ==========');
-              console.log(postText.substring(0, 1500));
+              console.log('\n========== CHOSEN POST ==========');
+              console.log(chosen.text.substring(0, 1500));
               console.log('========== END POST ==========');
-              console.log('Post ID:', postId);
-              console.log('Post URL:', postUrl);
+              console.log('Post ID:', chosen.id);
+              console.log('Post URL:', chosen.url);
+              console.log('Is BOOK DROP among articles:', !!bookDropArticle);
 
-              return {
-                id: postId || 'unknown-' + Date.now(),
-                url: postUrl,
-                text: postText
-              };
-
+              return chosen;
             } catch (error) {
               console.log('Endpoint error:', error.message);
               return null;
@@ -256,9 +270,14 @@ jobs:
 
             for (const endpoint of ENDPOINTS) {
               latest = await checkEndpoint(page, endpoint);
-              if (latest && latest.text && latest.id && !latest.id.startsWith('unknown-')) {
-                console.log('Working endpoint:', endpoint);
-                break;
+              if (latest && latest.text && latest.id && !String(latest.id).startsWith('unknown-')) {
+                // If this endpoint found a BOOK DROP, stop immediately
+                if (/book\s*drop/i.test(latest.text)) {
+                  console.log('Working endpoint (BOOK DROP found):', endpoint);
+                  break;
+                }
+                // Otherwise keep the first valid post but try next endpoints for a BOOK DROP
+                console.log('Working endpoint (no BOOK DROP yet):', endpoint);
               }
             }
 
@@ -278,10 +297,8 @@ jobs:
             console.log('Current post ID:', latest.id);
             console.log('Current fingerprint:', fingerprint);
 
-            // Always update last seen post id
             state.lastPostId = latest.id;
 
-            // First run ever: seed state, never notify
             if (!state.lastBookDropId && !state.lastBookDropFingerprint && state.seenBookDropIds.length === 0) {
               console.log('FIRST RUN - saving state without notification.');
               if (isBookDrop) {
@@ -300,7 +317,6 @@ jobs:
 
               if (idSeen || sameContent) {
                 console.log('Same BOOK DROP as before (id or content match). No notification.');
-                // Still record this pfbid variant so future scrapes of it are recognized
                 if (!state.seenBookDropIds.includes(latest.id)) {
                   state.seenBookDropIds.push(latest.id);
                   state.seenBookDropIds = state.seenBookDropIds.slice(-30);
@@ -318,7 +334,6 @@ jobs:
               }
             } else {
               console.log('Post is not a BOOK DROP. State updated (lastPostId only).');
-              // Never clear lastBookDropId / fingerprint
               fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
             }
 

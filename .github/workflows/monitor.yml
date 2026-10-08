@@ -1,4 +1,4 @@
-# Red Books BOOK DROP Monitor - scan all articles + fingerprint - 8 Oct 2026
+# Red Books BOOK DROP Monitor - multi-article + no null overwrite - 8 Oct 2026
 name: Red Books BOOK DROP Monitor
 
 on:
@@ -216,7 +216,6 @@ jobs:
               const loginWall = /log in|sign up|create new account|you must log in/i.test(bodyText.substring(0, 2000));
               if (loginWall) {
                 console.log('WARNING: Possible login wall detected.');
-                // Extra scroll/wait — sometimes more posts appear
                 await page.evaluate(() => window.scrollBy(0, 2500));
                 await page.waitForTimeout(3000);
               }
@@ -231,7 +230,6 @@ jobs:
                 return null;
               }
 
-              // Prefer a BOOK DROP article if any is present
               const bookDropArticle = articles.find(a => /book\s*drop/i.test(a.text));
               const chosen = bookDropArticle || articles[0];
 
@@ -269,15 +267,20 @@ jobs:
             let latest = null;
 
             for (const endpoint of ENDPOINTS) {
-              latest = await checkEndpoint(page, endpoint);
-              if (latest && latest.text && latest.id && !String(latest.id).startsWith('unknown-')) {
-                // If this endpoint found a BOOK DROP, stop immediately
-                if (/book\s*drop/i.test(latest.text)) {
+              const result = await checkEndpoint(page, endpoint);
+              if (result && result.text && result.id && !String(result.id).startsWith('unknown-')) {
+                if (/book\s*drop/i.test(result.text)) {
+                  latest = result;
                   console.log('Working endpoint (BOOK DROP found):', endpoint);
                   break;
                 }
-                // Otherwise keep the first valid post but try next endpoints for a BOOK DROP
-                console.log('Working endpoint (no BOOK DROP yet):', endpoint);
+                // Keep first valid post; do NOT let later failures clear it
+                if (!latest) {
+                  latest = result;
+                  console.log('Working endpoint (no BOOK DROP yet):', endpoint);
+                } else {
+                  console.log('Endpoint ok but keeping earlier result:', endpoint);
+                }
               }
             }
 
